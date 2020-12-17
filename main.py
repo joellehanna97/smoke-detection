@@ -9,6 +9,8 @@ import os
 import rasterio as rio
 import numpy as np
 
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+
 
 class Net(torch.nn.Module):
     def __init__(self, n_feature, n_hidden, n_output):
@@ -84,6 +86,8 @@ class FeaturesWeatherDataset(Dataset):
 
 
 def extract_images_feature(train_dl):
+    all_outputs = []
+    all_images = []
     # Create Model
     model = models.resnext50_32x4d(pretrained=True)
 
@@ -96,36 +100,38 @@ def extract_images_feature(train_dl):
 
     # Assuming that we are on a CUDA machine, this should print a CUDA device:
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(device)
 
     for epoch in range(2):  # loop over the dataset multiple times
         for i, data in enumerate(train_dl, 0):
             # inputs, labels = data[0].to(device), data[1].to(device)
-            inputs = data['img']
+            inputs = data['img'].float().to(device)
             # forward
             outputs = model(inputs)
-            print(outputs)
+            if epoch == 1:
+                all_images.append(data['imgfile'])
+                all_outputs.append(outputs.detach().numpy())
 
     print('Finished Training')
 
     PATH = './cifar_net.pth'
     torch.save(model.state_dict(), PATH)
-    return outputs
+    return all_outputs, all_images
 
 
 def train_gen_output(train_r):
-    model = Net(n_feature=1, n_hidden=10, n_output=1)     # define the network
+    model = Net(n_feature=1004, n_hidden=10, n_output=1)     # define the network
     # print(net)  # net architecture
     optimizer = torch.optim.SGD(model.parameters(), lr=0.2)
     loss_func = torch.nn.MSELoss()  # this is for regression mean squared loss
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # train the network
     for epoch in range(2):
         for i, data in enumerate(train_r):
-            inputs = data['X']
+            inputs, labels = data[0].float().to(device), data[1].float().to(device)
             # forward
             outputs = model(inputs)
-            loss = loss_func(outputs, data['y'])     # must be (1. nn output, 2. target)
+            loss = loss_func(outputs, labels)     # must be (1. nn output, 2. target)
 
             optimizer.zero_grad()   # clear gradients for next train
             loss.backward()         # backpropagation, compute gradients
@@ -135,18 +141,28 @@ def train_gen_output(train_r):
 def main():
     # Extract Image Features
     image_data = SmokePlumesSubsetDataset(datadir='/netscratch/jhanna/images_subset/training/')
-    print('here')
     train_fe = torch.utils.data.DataLoader(image_data, batch_size=64)  # data loader
-    output = extract_images_feature(train_fe)
+    output, images = extract_images_feature(train_fe)
+    np.save('/netscratch/jhanna/output', output)
+    np.save('/netscratch/jhanna/images', images)
 
     # Add Weather Data
-    df = pd.read_csv('labels.csv')
-    weather_data = df[['temp', 'humidity', 'wind-u', 'wind-v']].to_numpy()
-    X = np.append(output, weather_data)
-    y = df['gen_output'].to_numpy()
+    df = pd.read_csv('/netscratch/jhanna/labels.csv')
+    df.filename = df.filename.str.replace(':', '-')
+
+    inputs = []
+    labels = []
+    for i, batch in enumerate(output):
+        for j in range(0, len(batch)):
+            current_img = images[i][j].split('/')[6]
+            weather = df[df['filename'] == current_img][['temp', 'humidity', 'wind-u', 'wind-v']].to_numpy()
+            feats = output[i][j]
+            inputs.append(np.append(weather, feats))
+            labels.append(df[df['filename'] == current_img]['gen_output'].values)
+    labels = np.array(labels)
 
     # Predict Generation Output
-    gen_data = FeaturesWeatherDataset(X=X, y=y)
+    gen_data = FeaturesWeatherDataset(X=inputs, y=labels)
     train_r = torch.utils.data.DataLoader(gen_data, batch_size=64)  # data loader
     train_gen_output(train_r)
 
