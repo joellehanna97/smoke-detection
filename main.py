@@ -29,11 +29,13 @@ class Net2(torch.nn.Module):
         super(Net2, self).__init__()
         self.hidden1 = torch.nn.Linear(n_feature, n_hidden)   # hidden layer
         self.hidden2 = torch.nn.Linear(n_hidden, 100)   # hidden layer
-        self.predict = torch.nn.Linear(100, n_output)   # output layer
+        self.hidden3 = torch.nn.Linear(100, 10)   # hidden layer
+        self.predict = torch.nn.Linear(10, n_output)   # output layer
 
     def forward(self, x):
-        x = F.leaky_relu(self.hidden1(x))      # activation function for hidden layer
-        x = F.leaky_relu(self.hidden2(x))
+        x = F.relu(self.hidden1(x))      # activation function for hidden layer
+        x = F.relu(self.hidden2(x))
+        x = F.relu(self.hidden3(x))
         x = self.predict(x)             # linear output
         return x
 
@@ -116,32 +118,33 @@ def extract_images_feature(train_dl):
     print(device)
 
     model.to(device)
-    for epoch in range(10):  # loop over the dataset multiple times
+    for epoch in range(5):  # loop over the dataset multiple times
         for i, data in enumerate(train_dl, 0):
             inputs = data['img'].float().to(device)
 
             # forward
             outputs = model(inputs)
-            if epoch == 1:
+            if epoch == 4:
                 all_images.append(data['imgfile'])
                 all_outputs.append(outputs.detach().numpy())
     print('Finished Training')
 
-    PATH = './cifar_net.pth'
+    PATH = '/netscratch/jhanna/smoke-detection/image_net.pth'
     torch.save(model.state_dict(), PATH)
     return all_outputs, all_images
 
 
 def train_gen_output(train_r):
     model = Net2(n_feature=1004, n_hidden=200, n_output=1)     # define the network
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.2)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     loss_func = torch.nn.MSELoss()  # this is for regression mean squared loss
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(device)
     losses = []
     model.to(device)
     # train the network
-    for epoch in range(10):
+    all_outputs = []
+    for epoch in range(70):
         for i, data in enumerate(train_r):
             batch_loss = []
             inputs, labels = data[0].float().to(device), data[1].float().to(device)
@@ -152,7 +155,10 @@ def train_gen_output(train_r):
             loss.backward()         # backpropagation, compute gradients
             optimizer.step()        # apply gradients
             batch_loss.append(loss.data)
+            if epoch == 69:
+                 all_outputs.append(outputs.detach().numpy())
         losses.append(np.mean(batch_loss))
+    np.save('/netscratch/jhanna/smoke-detection/all_outputs', all_outputs)
     print(losses)
 
 
@@ -176,9 +182,12 @@ def main():
             labels.append(df[df['filename'] == current_img]['gen_output'].values)
     labels = np.array(labels)
 
-    inputs = (inputs - np.mean(inputs)) / (np.std(inputs))
+    #inputs = (inputs - np.mean(inputs)) / (np.std(inputs))
+    inputs = inputs / np.max(inputs)
+    print(inputs)
     # Predict Generation Output
     gen_data = FeaturesWeatherDataset(X=inputs, y=labels)
+    np.save('/netscratch/jhanna/smoke-detection/labels', labels)
     train_r = torch.utils.data.DataLoader(gen_data, batch_size=64)
     train_gen_output(train_r)
 
