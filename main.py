@@ -1,20 +1,20 @@
+import os
+import pandas as pd
+import rasterio as rio
+import numpy as np
 import torchvision.models as models
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 
-import pandas as pd
-import os
-import rasterio as rio
-import numpy as np
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 
 
-class Net(torch.nn.Module):
+class Net1(torch.nn.Module):
     def __init__(self, n_feature, n_hidden, n_output):
-        super(Net, self).__init__()
+        super(Net1, self).__init__()
         self.hidden = torch.nn.Linear(n_feature, n_hidden)   # hidden layer
         self.predict = torch.nn.Linear(n_hidden, n_output)   # output layer
 
@@ -96,21 +96,21 @@ def extract_images_feature(train_dl):
 
     new_classifier = nn.Sequential(*list(model.children())[:-1])  # remove last layer
     model.classifier = new_classifier
-    # model.to(device)
 
     # Assuming that we are on a CUDA machine, this should print a CUDA device:
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
+    print(device)
 
+    model.to(device)
     for epoch in range(2):  # loop over the dataset multiple times
         for i, data in enumerate(train_dl, 0):
-            # inputs, labels = data[0].to(device), data[1].to(device)
             inputs = data['img'].float().to(device)
+
             # forward
             outputs = model(inputs)
             if epoch == 1:
                 all_images.append(data['imgfile'])
                 all_outputs.append(outputs.detach().numpy())
-
     print('Finished Training')
 
     PATH = './cifar_net.pth'
@@ -119,20 +119,21 @@ def extract_images_feature(train_dl):
 
 
 def train_gen_output(train_r):
-    model = Net(n_feature=1004, n_hidden=10, n_output=1)     # define the network
-    # print(net)  # net architecture
+    model = Net1(n_feature=1004, n_hidden=10, n_output=1)     # define the network
     optimizer = torch.optim.SGD(model.parameters(), lr=0.2)
     loss_func = torch.nn.MSELoss()  # this is for regression mean squared loss
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print(device)
 
+    model.to(device)
     # train the network
     for epoch in range(2):
         for i, data in enumerate(train_r):
+            print(data)
             inputs, labels = data[0].float().to(device), data[1].float().to(device)
             # forward
             outputs = model(inputs)
             loss = loss_func(outputs, labels)     # must be (1. nn output, 2. target)
-
             optimizer.zero_grad()   # clear gradients for next train
             loss.backward()         # backpropagation, compute gradients
             optimizer.step()        # apply gradients
@@ -149,7 +150,6 @@ def main():
     # Add Weather Data
     df = pd.read_csv('/netscratch/jhanna/labels.csv')
     df.filename = df.filename.str.replace(':', '-')
-
     inputs = []
     labels = []
     for i, batch in enumerate(output):
@@ -163,7 +163,7 @@ def main():
 
     # Predict Generation Output
     gen_data = FeaturesWeatherDataset(X=inputs, y=labels)
-    train_r = torch.utils.data.DataLoader(gen_data, batch_size=64)  # data loader
+    train_r = torch.utils.data.DataLoader(gen_data, batch_size=64)
     train_gen_output(train_r)
 
 
