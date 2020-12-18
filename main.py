@@ -102,7 +102,7 @@ def extract_images_feature(train_dl):
     print(device)
 
     model.to(device)
-    for epoch in range(2):  # loop over the dataset multiple times
+    for epoch in range(10):  # loop over the dataset multiple times
         for i, data in enumerate(train_dl, 0):
             inputs = data['img'].float().to(device)
 
@@ -124,12 +124,12 @@ def train_gen_output(train_r):
     loss_func = torch.nn.MSELoss()  # this is for regression mean squared loss
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(device)
-
+    losses = []
     model.to(device)
     # train the network
-    for epoch in range(2):
+    for epoch in range(10):
         for i, data in enumerate(train_r):
-            print(data)
+            batch_loss = []
             inputs, labels = data[0].float().to(device), data[1].float().to(device)
             # forward
             outputs = model(inputs)
@@ -137,15 +137,15 @@ def train_gen_output(train_r):
             optimizer.zero_grad()   # clear gradients for next train
             loss.backward()         # backpropagation, compute gradients
             optimizer.step()        # apply gradients
-
+            batch_loss.append(loss.data)
+        losses.append(np.mean(batch_loss))
+    print(losses)
 
 def main():
     # Extract Image Features
     image_data = SmokePlumesSubsetDataset(datadir='/netscratch/jhanna/images_subset/training/')
     train_fe = torch.utils.data.DataLoader(image_data, batch_size=64)  # data loader
     output, images = extract_images_feature(train_fe)
-    np.save('/netscratch/jhanna/output', output)
-    np.save('/netscratch/jhanna/images', images)
 
     # Add Weather Data
     df = pd.read_csv('/netscratch/jhanna/labels.csv')
@@ -160,12 +160,13 @@ def main():
             inputs.append(np.append(weather, feats))
             labels.append(df[df['filename'] == current_img]['gen_output'].values)
     labels = np.array(labels)
-
+    
+    inputs = (inputs - np.mean(inputs)) / (np.std(inputs))
     # Predict Generation Output
     gen_data = FeaturesWeatherDataset(X=inputs, y=labels)
     train_r = torch.utils.data.DataLoader(gen_data, batch_size=64)
     train_gen_output(train_r)
 
 
-if __name__ == 'main':
+if __name__ == "__main__": 
     main()
