@@ -24,6 +24,20 @@ class Net1(torch.nn.Module):
         return x
 
 
+class Net2(torch.nn.Module):
+    def __init__(self, n_feature, n_hidden, n_output):
+        super(Net2, self).__init__()
+        self.hidden1 = torch.nn.Linear(n_feature, n_hidden)   # hidden layer
+        self.hidden2 = torch.nn.Linear(n_hidden, 100)   # hidden layer
+        self.predict = torch.nn.Linear(100, n_output)   # output layer
+
+    def forward(self, x):
+        x = F.leaky_relu(self.hidden1(x))      # activation function for hidden layer
+        x = F.leaky_relu(self.hidden2(x))
+        x = self.predict(x)             # linear output
+        return x
+
+
 class SmokePlumesSubsetDataset(Dataset):
     """Smoke plumes subset dataset."""
 
@@ -119,7 +133,7 @@ def extract_images_feature(train_dl):
 
 
 def train_gen_output(train_r):
-    model = Net1(n_feature=1004, n_hidden=10, n_output=1)     # define the network
+    model = Net2(n_feature=1004, n_hidden=200, n_output=1)     # define the network
     optimizer = torch.optim.SGD(model.parameters(), lr=0.2)
     loss_func = torch.nn.MSELoss()  # this is for regression mean squared loss
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -141,6 +155,7 @@ def train_gen_output(train_r):
         losses.append(np.mean(batch_loss))
     print(losses)
 
+
 def main():
     # Extract Image Features
     image_data = SmokePlumesSubsetDataset(datadir='/netscratch/jhanna/images_subset/training/')
@@ -160,7 +175,7 @@ def main():
             inputs.append(np.append(weather, feats))
             labels.append(df[df['filename'] == current_img]['gen_output'].values)
     labels = np.array(labels)
-    
+
     inputs = (inputs - np.mean(inputs)) / (np.std(inputs))
     # Predict Generation Output
     gen_data = FeaturesWeatherDataset(X=inputs, y=labels)
