@@ -101,6 +101,23 @@ class FeaturesWeatherDataset(Dataset):
         return X, y
 
 
+class TestFeaturesWeatherDataset(Dataset):
+    def __init__(self, X=None):
+        """
+        Args:
+            X (array)
+        """
+        self.X = X
+
+    def __len__(self):
+        return len(self.X)
+
+    def __getitem__(self, idx):
+        # Load data and get label
+        X = self.X[idx]
+        return X
+
+
 def extract_images_feature(train_dl):
     all_outputs = []
     all_images = []
@@ -156,10 +173,23 @@ def train_gen_output(train_r):
             optimizer.step()        # apply gradients
             batch_loss.append(loss.data)
             if epoch == 69:
-                 all_outputs.append(outputs.detach().numpy())
+                all_outputs.append(outputs.detach().numpy())
         losses.append(np.mean(batch_loss))
-    np.save('/netscratch/jhanna/smoke-detection/all_outputs', all_outputs)
     print(losses)
+    PATH = '/netscratch/jhanna/smoke-detection/gen_net.pth'
+    torch.save(model.state_dict(), PATH)
+    return all_outputs
+
+
+def test_gen_output(test_r):
+    model = Net2(n_feature=1004, n_hidden=200, n_output=1)     # define the network
+    PATH = '/netscratch/jhanna/smoke-detection/gen_net.pth'
+    model.load_state_dict(torch.load(PATH))
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    for i, data in enumerate(test_r):
+        inputs = data.float().to(device)
+        outputs = model(inputs)
+    np.save('predictions', outputs)
 
 
 def main():
@@ -182,15 +212,40 @@ def main():
             labels.append(df[df['filename'] == current_img]['gen_output'].values)
     labels = np.array(labels)
 
-    #inputs = (inputs - np.mean(inputs)) / (np.std(inputs))
-    inputs = inputs / np.max(inputs)
-    print(inputs)
     # Predict Generation Output
+    # inputs = (inputs - np.mean(inputs)) / (np.std(inputs))
+    inputs = inputs / np.max(inputs)
     gen_data = FeaturesWeatherDataset(X=inputs, y=labels)
-    np.save('/netscratch/jhanna/smoke-detection/labels', labels)
     train_r = torch.utils.data.DataLoader(gen_data, batch_size=64)
     train_gen_output(train_r)
 
+    # TEST
 
-if __name__ == "__main__": 
+    # Extract Image Features
+    image_data = SmokePlumesSubsetDataset(datadir='/netscratch/jhanna/images_subset/testing/')
+    test_fe = torch.utils.data.DataLoader(image_data, batch_size=64)  # data loader
+    output, images = extract_images_feature(test_fe)
+
+    # Add Weather Data
+    df = pd.read_csv('/netscratch/jhanna/test_labels.csv')
+    df.filename = df.filename.str.replace(':', '-')
+    inputs = []
+    labels = []
+    for i, batch in enumerate(output):
+        for j in range(0, len(batch)):
+            current_img = images[i][j].split('/')[6]
+            weather = df[df['filename'] == current_img][['temp', 'humidity', 'wind-u', 'wind-v']].to_numpy()
+            feats = output[i][j]
+            inputs.append(np.append(weather, feats))
+            labels.append(df[df['filename'] == current_img]['gen_output'].values)
+    labels = np.array(labels)
+
+    inputs = inputs / np.max(inputs)
+    gen_data = TestFeaturesWeatherDataset(X=inputs)
+    np.save('/netscratch/jhanna/smoke-detection/labels', labels)
+    test_r = torch.utils.data.DataLoader(gen_data, batch_size=64)
+    test_gen_output(test_r)
+
+
+if __name__ == "__main__":
     main()
